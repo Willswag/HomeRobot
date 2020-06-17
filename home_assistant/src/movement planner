@@ -1,0 +1,113 @@
+#! /usr/bin/env python
+
+#this is the client for controling a robot with a list of points
+#it is the main file for conducting tours
+#import the required libraries
+import rospy
+import actionlib
+import json
+import cv2
+#import messages and math
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from math import radians, degrees
+from actionlib_msgs.msg import *
+from geometry_msgs.msg import Point
+from door.srv import *
+import time
+
+#define tour class that contains tour operations
+class movement_planner():
+
+  def point_parser(self,filename):
+  #read in the tour file that contains tour information and return list of python dicts
+    with open(filename,'r') as l:
+      locations= json.load(l)
+      rospy.loginfo(locations)
+    #read in location list
+    #l = '{"origin":{"x": 0.0,"y":0.0,"rz":0.0},"loc1":{"x": 1.0,"y":2.0,"rz":3.0}}'
+    #locations= json.loads(l)
+    return locations
+
+  def __init__(self):
+
+    #provide command line interface for reading files from command line and launch files
+    argv= rospy.myargv(argv=sys.argv)
+    fname = argv[1]
+    locations = self.point_parser(fname)
+
+    #begin the tour node
+    rospy.init_node('movement',anonymous = False)
+
+    #conduct the tours by looping through the list of locations
+    for i in locations:
+
+      #log next location to send robot to
+      rospy.loginfo("moving to %s",i.get("name"))
+
+      #call the moveToGoal action and waitfor its response
+      self.goalReached = self.moveToGoal(i.get("x"), i.get("y"),i.get("rz"))
+      if self.goalReached == True:
+        rospy.loginfo("at %s",i.get("name"))
+        time.sleep(1.0)
+
+      #check for door at given location
+      if int(i.get("door")) != 0:
+        #print(type(i.get("door")))
+        rospy.loginfo("opening door")
+        self.dooropened = self.open_door(int(i.get("door")))
+        if self.dooropened == True:
+          rospy.loginfo('going through door')
+      else:
+        rospy.loginfo('no door to open')
+
+  #cleanly shudown ros
+  def shutdown(self):
+    #stop the program at the end of tour
+    rospy.loginfo("quit program")
+    rospy.sleep()
+
+
+  def moveToGoal(self,x,y,rz):
+    #define a client to send movement commands to the movebase server
+    ac =actionlib.SimpleActionClient("move_base", MoveBaseAction)
+    #wait for move base server to come up
+    while(not ac.wait_for_server(rospy.Duration.from_sec(5.0))):
+      rospy.loginfo("waiting for move base server")
+    #construct move base goal object
+
+    goal = MoveBaseGoal()
+
+    #populate data for moving the goal with provided data
+    goal.target_pose.header.frame_id = "map"
+    goal.target_pose.header.stamp = rospy.Time.now()
+
+    goal.target_pose.pose.position = Point(x,y,0)
+    goal.target_pose.pose.orientation.x = 0.0
+    goal.target_pose.pose.orientation.y = 0.0
+    goal.target_pose.pose.orientation.z = rz
+    goal.target_pose.pose.orientation.w = 1.0
+    #log robot is sending data  and  send goal
+    rospy.loginfo("Sending goal location")
+    ac.send_goal(goal)
+
+    #wait 120 seconds to reach goal
+    ac.wait_for_result(rospy.Duration(120))
+
+    #check if we made it to the goal
+    if(ac.get_state()== GoalStatus.SUCCEEDED):
+      rospy.loginfo("reached goal")
+      return True
+    else:
+      rospy.loginfo("the robot failed to reach the goal")
+      return False
+
+
+
+
+if __name__ == '__main__':
+  try:
+    #call the tour
+    tour()
+    rospy.spin()
+  except rospy.ROSInterruptException:
+    pass
